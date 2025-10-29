@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlparse
 
 import voluptuous as vol
 from homeassistant import config_entries
@@ -27,41 +28,42 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            # Normalize URL (strip trailing slash)
-            url = user_input[CONF_URL].rstrip("/")
-            if not url.startswith("http"):
-                errors["base"] = "invalid_url"
-            else:
-                # Uniqueness check: same URL + username
-                for entry in self._async_current_entries():
-                    if (
-                        entry.data.get(CONF_URL, "").rstrip("/") == url
-                        and entry.data.get(CONF_USERNAME) == user_input[CONF_USERNAME]
-                    ):
-                        return self.async_abort(reason="already_configured")
+            # Normalize URL using urlparse
+            parsed_url = urlparse(user_input[CONF_URL])
+            normalized_url = f"{parsed_url.scheme}://{parsed_url.netloc}{parsed_url.path.rstrip('/')}"
+            
+            # Uniqueness check: same URL + username
+            for entry in self._async_current_entries():
+                entry_parsed = urlparse(entry.data.get(CONF_URL, ""))
+                entry_normalized = f"{entry_parsed.scheme}://{entry_parsed.netloc}{entry_parsed.path.rstrip('/')}"
+                if (
+                    entry_normalized == normalized_url
+                    and entry.data.get(CONF_USERNAME) == user_input[CONF_USERNAME]
+                ):
+                    return self.async_abort(reason="already_configured")
 
-                client = InfometricClient(
-                    url,
-                    user_input[CONF_USERNAME],
-                    user_input[CONF_PASSWORD],
+            client = InfometricClient(
+                normalized_url,
+                user_input[CONF_USERNAME],
+                user_input[CONF_PASSWORD],
+            )
+            try:
+                await client.authenticate(
+                    aiohttp_client.async_get_clientsession(self.hass)
                 )
-                try:
-                    await client.authenticate(
-                        aiohttp_client.async_get_clientsession(self.hass)
-                    )
-                except Exception as auth_err:  # Differentiate later if needed
-                    errors["base"] = "auth_failed"
-                else:
-                    user_input[CONF_URL] = url
-                    return self.async_create_entry(
-                        title=user_input.get(CONF_NAME, DEFAULT_NAME), data=user_input
-                    )
+            except Exception as auth_err:  # Differentiate later if needed
+                errors["base"] = "auth_failed"
+            else:
+                user_input[CONF_URL] = normalized_url
+                return self.async_create_entry(
+                    title=user_input.get(CONF_NAME, DEFAULT_NAME), data=user_input
+                )
 
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_URL, default=f"{DEFAULT_URL}/"): str,
+                    vol.Required(CONF_URL, default=f"{DEFAULT_URL}/"): vol.Url(),
                     vol.Required(CONF_USERNAME): str,
                     vol.Required(CONF_PASSWORD): str,
                     vol.Optional(CONF_NAME, default=DEFAULT_NAME): str,
