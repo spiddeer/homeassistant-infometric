@@ -45,15 +45,16 @@ class InfometricClient:
         with hidden token parsing if the site introduces anti-forgery tokens.
         """
         self._session = session
-        login_payload = (
-            f"UserName={self._username}&Password={self._password}&"
-            "RememberMe=true&commit=Logga+in"
-        )
+        login_payload = {
+            "UserName": self._username,
+            "Password": self._password,
+            "RememberMe": "true",
+            "commit": "Logga in",
+        }
         try:
             resp = await self._session.post(
                 url=self._base_url,
                 data=login_payload,
-                headers={"content-type": "application/x-www-form-urlencoded"},
             )
         except ClientError as err:
             raise InfometricException(f"Network error during authenticate: {err}") from err
